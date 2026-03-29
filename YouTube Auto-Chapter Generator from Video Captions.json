@@ -1,0 +1,333 @@
+{
+  "name": "YouTube Auto-Chapter Generator from Video Captions",
+  "nodes": [
+    {
+      "parameters": {
+        "public": true,
+        "options": {
+          "inputPlaceholder": "Paste YouTube video URL here...",
+          "subtitle": "Enter a YouTube video URL to generate chapter timestamps",
+          "title": "YouTube Chapter Generator",
+          "responseMode": "responseNodes"
+        }
+      },
+      "id": "253a5815-c179-4444-931b-cbf2e196aa77",
+      "name": "Chat Trigger",
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        240,
+        304
+      ],
+      "webhookId": "51334178-be71-488f-b15c-9b34abedb6e8"
+    },
+    {
+      "parameters": {
+        "resource": "video",
+        "operation": "get",
+        "videoId": "=dQw4w9WgXcQ",
+        "part": [
+          "snippet",
+          "contentDetails"
+        ],
+        "options": {}
+      },
+      "id": "055970ec-4b1b-4755-a31e-49bd09b71fed",
+      "name": "Get Video Details",
+      "type": "n8n-nodes-base.youTube",
+      "typeVersion": 1,
+      "position": [
+        464,
+        304
+      ],
+      "credentials": {
+        "youTubeOAuth2Api": {
+          "id": "TM6KBMQ6W7PyRLmX",
+          "name": "YouTube account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://www.youtube.com/api/timedtext?lang=en&v={{ $(\"Get Video Details\").item.json.id }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "outputPropertyName": "transcript"
+            }
+          }
+        }
+      },
+      "id": "f2c18960-6eab-427d-8409-30cf665cf066",
+      "name": "Fetch Video Transcript",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        688,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const transcript = $input.first().json.transcript;\n\nif (!transcript || transcript.trim() === \"\") {\n  return [{ json: { error: \"No transcript available for this video\" } }];\n}\n\nconst textMatches = transcript.match(/<text[^>]*>([^<]*)<\\/text>/g) || [];\nconst fullText = textMatches\n  .map(match => {\n    const text = match.replace(/<text[^>]*>([^<]*)<\\/text>/, \"$1\");\n    return text\n      .replace(/&amp;/g, \"&\")\n      .replace(/&lt;/g, \"<\")\n      .replace(/&gt;/g, \">\")\n      .replace(/&quot;/g, '\"');\n  })\n  .join(\" \");\n\nreturn [{ json: { fullTranscript: fullText } }];"
+      },
+      "id": "92a2fae9-d98a-4a2b-9b61-da51d9a72e24",
+      "name": "Parse Transcript XML",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        912,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Analyze this YouTube video transcript and identify major topic shifts to create chapter timestamps.\n\nVideo Title: {{ $(\"Get Video Details\").item.json.snippet.title }}\nDuration: {{ $(\"Get Video Details\").item.json.contentDetails.duration }}\n\nTranscript:\n{{ $json.fullTranscript }}\n\nCreate chapter timestamps with descriptive titles. Start with 0:00 for the introduction. Format timestamps as MM:SS or H:MM:SS. Identify 5-10 meaningful chapters based on topic changes.",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "You are a YouTube chapter generator. Analyze video transcripts to identify topic shifts and create accurate chapter timestamps with descriptive titles. Return structured JSON with chapters array containing timestamp and title fields."
+        }
+      },
+      "id": "de874464-3c18-432d-8d2a-78165b3f3cd2",
+      "name": "Generate Chapters",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        1136,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{ \"chapters\": [{ \"timestamp\": \"0:00\", \"title\": \"Introduction\" }, { \"timestamp\": \"1:30\", \"title\": \"Main Topic\" }] }"
+      },
+      "id": "865c9013-029e-4719-b945-15ec029513e7",
+      "name": "Chapter Format Parser",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        1296,
+        528
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1",
+              "name": "videoId",
+              "type": "string",
+              "value": "={{ $(\"Get Video Details\").item.json.id }}"
+            },
+            {
+              "id": "2",
+              "name": "originalDescription",
+              "type": "string",
+              "value": "={{ $(\"Get Video Details\").item.json.snippet.description }}"
+            },
+            {
+              "id": "3",
+              "name": "chapterList",
+              "type": "string",
+              "value": "={{ $json.output.chapters.map(ch => ch.timestamp + \" \" + ch.title).join(\"\\n\") }}"
+            },
+            {
+              "id": "4",
+              "name": "newDescription",
+              "type": "string",
+              "value": "={{ $(\"Get Video Details\").item.json.snippet.description }}\n\n📑 CHAPTERS\n{{ $json.chapterList }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "2ea47884-1e5d-45c0-891e-1002e51e2b3b",
+      "name": "Format New Description",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1488,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "video",
+        "operation": "update",
+        "videoId": "={{ $json.videoId }}",
+        "title": "={{ $(\"Get Video Details\").item.json.snippet.title }}",
+        "regionCode": "us",
+        "categoryId": "={{ $(\"Get Video Details\").item.json.snippet.categoryId }}",
+        "updateFields": {
+          "description": "={{ $json.newDescription }}"
+        }
+      },
+      "id": "04954645-1e04-42aa-9138-37563ee0f743",
+      "name": "Update Video Description",
+      "type": "n8n-nodes-base.youTube",
+      "typeVersion": 1,
+      "position": [
+        1712,
+        304
+      ],
+      "credentials": {
+        "youTubeOAuth2Api": {
+          "id": "TM6KBMQ6W7PyRLmX",
+          "name": "YouTube account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "message": "=✅ Chapter timestamps have been successfully added to your video!\n\nVideo: {{ $(\"Get Video Details\").item.json.snippet.title }}\n\nGenerated Chapters:\n{{ $(\"Format New Description\").item.json.chapterList }}\n\nThe video description has been updated with the chapter timestamps.",
+        "options": {}
+      },
+      "id": "a8e51fd2-6ca8-4e2e-8a50-4bb91fe1a0d7",
+      "name": "Send Confirmation",
+      "type": "@n8n/n8n-nodes-langchain.chat",
+      "typeVersion": 1.3,
+      "position": [
+        1936,
+        304
+      ],
+      "webhookId": "a18c8c49-6d2e-45a8-baa6-4427effb5d33"
+    },
+    {
+      "parameters": {
+        "model": "llama-3.3-70b-versatile",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        1136,
+        528
+      ],
+      "id": "01e300db-5671-44bb-b963-13ed2699e859",
+      "name": "Groq Chat Model",
+      "credentials": {
+        "groqApi": {
+          "id": "BhJf3FwX41eTo58e",
+          "name": "Groq account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Chat Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Video Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Video Details": {
+      "main": [
+        [
+          {
+            "node": "Fetch Video Transcript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Video Transcript": {
+      "main": [
+        [
+          {
+            "node": "Parse Transcript XML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Transcript XML": {
+      "main": [
+        [
+          {
+            "node": "Generate Chapters",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Chapters": {
+      "main": [
+        [
+          {
+            "node": "Format New Description",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chapter Format Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Generate Chapters",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format New Description": {
+      "main": [
+        [
+          {
+            "node": "Update Video Description",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Video Description": {
+      "main": [
+        [
+          {
+            "node": "Send Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Generate Chapters",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "747c8c65-6fc6-4885-9626-5fe340031f60",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "201bb8fd7ef9863ffbebde666a9f1493d2761111631be71b5ab59e298153ec23"
+  },
+  "id": "n9xxF15DQXYsdfrK",
+  "tags": []
+}
